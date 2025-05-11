@@ -1,3 +1,4 @@
+import os
 import pandas as pd
 import duckdb, boto3
 from urllib.parse import quote
@@ -6,7 +7,21 @@ from langchain.chat_models import ChatOpenAI
 from langchain_experimental.agents import create_pandas_dataframe_agent
 from langchain.agents.agent_types import AgentType
 
-# ---------- 1. load data ----------
+# ---------- 1. load credentials ----------
+def ensure_credentials():
+    # AWS credentials
+    if not os.getenv("AWS_ACCESS_KEY_ID") and "aws" in st.secrets:
+        os.environ["AWS_ACCESS_KEY_ID"] = st.secrets["aws"]["AWS_ACCESS_KEY_ID"]
+    if not os.getenv("AWS_SECRET_ACCESS_KEY") and "aws" in st.secrets:
+        os.environ["AWS_SECRET_ACCESS_KEY"] = st.secrets["aws"]["AWS_SECRET_ACCESS_KEY"]
+
+    # OpenAI key
+    if not os.getenv("OPENAI_API_KEY") and "openai" in st.secrets:
+        os.environ["OPENAI_API_KEY"] = st.secrets["openai"]["OPENAI_API_KEY"]
+
+ensure_credentials()
+
+# ---------- 2. load data ----------
 st.set_page_config(page_title="🌩️ NOAA Storm Chatbot", page_icon="🌪️")
 @st.cache_data(show_spinner="Loading from S3…")
 
@@ -56,7 +71,6 @@ def load_from_s3():
     return df
 
 df = load_from_s3()
-print(df.info())
 
 system_prompt = (
     "You are an expert data assistant and will use the dataset provided to give answers"
@@ -64,13 +78,13 @@ system_prompt = (
     "`python_repl_ast`, **without square brackets**."
 )
 
-# ---------- 2. initialise the LLM ----------
+# ---------- 3. initialise the LLM ----------
 llm = ChatOpenAI(
     model="gpt-3.5-turbo-0125",  
     temperature=0
 )
 
-# ---------- 3. build the agent ----------
+# ---------- 4. build the agent ----------
 agent = create_pandas_dataframe_agent(
     llm, df,
     agent_type=AgentType.ZERO_SHOT_REACT_DESCRIPTION,   # avoids function/tool roles
@@ -80,7 +94,7 @@ agent = create_pandas_dataframe_agent(
     allow_dangerous_code=True
 )
 
-# ---------- 4. Streamlit UI ----------
+# ---------- 5. Streamlit UI ----------
 st.markdown("<h1>🌩️ NOAA Storm Events Explorer</h1>", unsafe_allow_html=True)
 query = st.text_input("Ask about the 2024 storm data:")
 
