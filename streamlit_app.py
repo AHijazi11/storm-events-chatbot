@@ -1,11 +1,11 @@
 import os
-import pandas as pd
+import pandasai as pai
 import duckdb, boto3
 from urllib.parse import quote
 import streamlit as st
-from langchain.chat_models import ChatOpenAI
-from langchain_experimental.agents import create_pandas_dataframe_agent
-from langchain.agents.agent_types import AgentType
+from pandasai_litellm import LiteLLM
+import pathlib
+
 
 # ---------- 1. load credentials ----------
 def ensure_credentials():
@@ -23,7 +23,7 @@ ensure_credentials()
 
 # ---------- 2. load data ----------
 st.set_page_config(page_title="🌩️ NOAA Storm Chatbot", page_icon="🌪️")
-@st.cache_data(show_spinner="Loading from S3…")
+@st.cache_data(show_spinner="Loading NOAA 2024 Storm Events Data from Delta Lakehouse..")
 
 def load_from_s3():
     bucket   = "ibhs-lakehouse-poc-1746937696"
@@ -66,42 +66,68 @@ def load_from_s3():
 
     # build a single comma-separated list of URI strings
     uris = ", ".join(f"'{f's3://{bucket}/{quote(k)}'}'" for k in keys_kept)
-    print(uris)
     df = con.sql(f"SELECT * FROM read_parquet([{uris}])").df()
     return df
 
-df = load_from_s3()
+df = pai.DataFrame(load_from_s3())
 
-system_prompt = (
-    "You are an expert data assistant and will use the dataset provided to give answers"
-    "When you need to run Python, call the tool exactly as "
-    "`python_repl_ast`, **without square brackets**."
-)
+# ---------- 3. Create LLM wrapper ----------
+llm = LiteLLM(model="o4-mini", temperature=1)   # ← o-series needs temp=1
 
-# ---------- 3. initialise the LLM ----------
-llm = ChatOpenAI(
-    model="gpt-3.5-turbo-0125",  
-    temperature=0
-)
+# make this the default LLM for .chat()
+pai.config.set({"llm": llm})
 
-# ---------- 4. build the agent ----------
-agent = create_pandas_dataframe_agent(
-    llm, df,
-    agent_type=AgentType.ZERO_SHOT_REACT_DESCRIPTION,   # avoids function/tool roles
-    prefix_messages=[{"role": "system", "content": system_prompt}],
-    verbose=True,
-    handle_parsing_errors=True,
-    allow_dangerous_code=True
-)
+# ---------- 4. Streamlit UI ----------
+def show_answer(answer: object):
+    # 1.  Convert to plain text and strip wrappers / whitespace
+    if isinstance(answer, pathlib.Path):
+        path = str(answer)
+    else:
+        path = str(answer).strip().strip("`'\"")   # remove ` ` or quotes
 
-# ---------- 5. Streamlit UI ----------
-st.markdown("<h1>🌩️ NOAA Storm Events Explorer</h1>", unsafe_allow_html=True)
-query = st.text_input("Ask about the 2024 storm data:")
+    # 2.  If it still looks like an image file *and* exists, display it
+    if path.lower().endswith((".png", ".jpg", ".jpeg", ".svg")) and os.path.exists(path):
+        st.image(path, use_column_width=True)
+        st.caption(f"[download]({path})")
+    else:
+        st.success(answer)
+
+# -------------------------------------------------
+# 💬  Session-level chat history
+# -------------------------------------------------
+if "messages" not in st.session_state:
+    # each item: {"user": "...", "bot": "..."}   (bot may be str or file path)
+    st.session_state.messages = []
+
+# -------------------------------------------------
+# UI – previous chat bubbles
+# -------------------------------------------------
+st.markdown("<h1>🌩️ NOAA 2024 Storm Events Explorer</h1>", unsafe_allow_html=True)
+for turn in st.session_state.messages:
+    with st.chat_message("user"):
+        st.write(turn["user"])
+    with st.chat_message("assistant"):
+        show_answer(turn["bot"])
+
+# -------------------------------------------------
+# UI – input box
+# -------------------------------------------------
+query = st.chat_input("Ask about the 2024 storm data…")
 
 if query:
-    with st.spinner("Thinking..."):
+    # show user bubble immediately
+    with st.chat_message("user"):
+        st.write(query)
+
+    with st.spinner("Thinking…"):
         try:
-            answer = agent.run(query)
-            st.success(answer)
+            answer = df.chat(query)
         except Exception as e:
-            st.error(f"⚠️ {e}")
+            answer = f"⚠️ {e}"
+
+    # show assistant bubble & capture what was rendered
+    with st.chat_message("assistant"):
+        rendered = show_answer(answer)
+
+    # save to history
+    st.session_state.messages.append({"user": query, "bot": answer})
