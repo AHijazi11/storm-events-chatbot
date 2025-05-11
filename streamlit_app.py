@@ -112,22 +112,25 @@ for turn in st.session_state.messages:
 # -------------------------------------------------
 # UI – input box
 # -------------------------------------------------
-query = st.chat_input("Ask about the 2024 storm data…")
+CURRENCY_HINT = (
+    "\n\nIMPORTANT:  If you include any damage, loss or cost amounts, "
+    "format them as US currency — add a leading “$” and thousands separators "
+    "(e.g. $48,215,600,000.00)."
+)
 
-if query:
-    # show user bubble immediately
+query_raw = st.chat_input("Ask about the 2024 storm data…")
+
+if query_raw:
+    query_for_llm = query_raw + CURRENCY_HINT      # ← append the hint
+
     with st.chat_message("user"):
-        st.write(query)
+        st.write(query_raw)                        # show clean text to user
 
     with st.spinner("Thinking…"):
-        try:
-            answer = df.chat(query)
-        except Exception as e:
-            answer = f"⚠️ {e}"
+        answer = df.chat(query_for_llm)            # send expanded prompt
 
-    # show assistant bubble & capture what was rendered
     with st.chat_message("assistant"):
         rendered = show_answer(answer)
 
     # save to history
-    st.session_state.messages.append({"user": query, "bot": answer})
+    st.session_state.messages.append({"user": query_raw, "bot": answer})
