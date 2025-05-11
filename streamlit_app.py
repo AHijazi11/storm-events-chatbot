@@ -6,13 +6,12 @@ from langchain.chat_models import ChatOpenAI
 from langchain_experimental.agents import create_pandas_dataframe_agent
 from langchain.agents.agent_types import AgentType
 
-# ---------- 2. load your data ----------
-# df = pd.read_csv("cleaned_storm_events.csv")
+# ---------- 1. load data ----------
 st.set_page_config(page_title="🌩️ NOAA Storm Chatbot", page_icon="🌪️")
 @st.cache_data(show_spinner="Loading from S3…")
 
 def load_from_s3():
-    bucket   = "ibhs-lakehouse-poc-1746728142"
+    bucket   = "ibhs-lakehouse-poc-1746937696"
     prefix   = "delta/storm_events/"
     region   = "us-east-1"
 
@@ -46,6 +45,7 @@ def load_from_s3():
 
     # feed to DuckDB
     con = duckdb.connect()
+    con.execute("INSTALL httpfs;")
     con.execute("LOAD httpfs;")
     con.execute(f"SET s3_region='{region}';")
 
@@ -59,20 +59,18 @@ df = load_from_s3()
 print(df.info())
 
 system_prompt = (
-    "You are an expert data assistant. "
+    "You are an expert data assistant and will use the dataset provided to give answers"
     "When you need to run Python, call the tool exactly as "
     "`python_repl_ast`, **without square brackets**."
 )
 
-# ---------- 3. initialise the LLM ----------
+# ---------- 2. initialise the LLM ----------
 llm = ChatOpenAI(
     model="gpt-3.5-turbo-0125",  
     temperature=0
 )
 
-# llm = llm.bind(system=system_prompt)   # bind the prompt once
-
-# ---------- 4. build the agent ----------
+# ---------- 3. build the agent ----------
 agent = create_pandas_dataframe_agent(
     llm, df,
     agent_type=AgentType.ZERO_SHOT_REACT_DESCRIPTION,   # avoids function/tool roles
@@ -82,8 +80,7 @@ agent = create_pandas_dataframe_agent(
     allow_dangerous_code=True
 )
 
-# ---------- 5. Streamlit UI ----------
-
+# ---------- 4. Streamlit UI ----------
 st.markdown("<h1>🌩️ NOAA Storm Events Explorer</h1>", unsafe_allow_html=True)
 query = st.text_input("Ask about the 2024 storm data:")
 
